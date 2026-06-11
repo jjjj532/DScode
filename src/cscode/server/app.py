@@ -4,10 +4,12 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
+api_router = APIRouter(prefix="/api")
 
 from cscode.core.config import load_config
 from cscode.core.engine import Agent, AgentOptions
@@ -26,9 +28,6 @@ from cscode.tools.write import WriteTool
 WEB_DIST = Path(__file__).resolve().parent.parent / "web" / "dist"
 
 app = FastAPI(title="CScode API", version="0.1.0")
-
-if WEB_DIST.exists():
-    app.mount("/", StaticFiles(directory=str(WEB_DIST), html=True), name="web")
 
 app.add_middleware(
     CORSMiddleware,
@@ -51,6 +50,107 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     response: str
     session_id: str
+
+
+class ConfigRequest(BaseModel):
+    provider: str = "openai"
+    model: str = "gpt-4o"
+    api_base: str | None = None
+    api_key: str | None = None
+    max_tokens: int = 4096
+    temperature: float = 0.7
+    top_p: float = 1.0
+    system_prompt: str | None = None
+
+
+class SessionCreateRequest(BaseModel):
+    title: str = "New Session"
+
+
+@api_router.get("/health")
+async def health() -> dict[str, str]:
+    return {"status": "ok", "version": "0.1.0"}
+
+
+@api_router.post("/chat", response_model=ChatResponse)
+async def chat(request: ChatRequest) -> ChatResponse:
+    if _agent is None or _session_store is None:
+        raise HTTPException(status_code=503, detail="Server not initialized")
+
+    session_id = request.session_id or str(uuid.uuid4())
+
+    try:
+        response = await _agent.run(request.message)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    return ChatResponse(response=response, session_id=session_id)
+
+
+@api_router.get("/sessions")
+async def list_sessions() -> list[dict[str, Any]]:
+    if _session_store is None:
+        raise HTTPException(status_code=503, detail="Server not initialized")
+    sessions = await _session_store.list()
+    return [
+        {
+            "id": s.id,
+            "title": s.title,
+            "provider": s.provider,
+            "model": s.model,
+            "created_at": s.created_at.isoformat() if s.created_at else "",
+            "updated_at": s.updated_at.isoformat() if s.updated_at else "",
+        }
+        for s in sessions
+    ]
+
+
+@api_router.get("/config")
+async def get_config() -> dict[str, Any]:
+    from cscode.core.config import load_config
+    config = load_config()
+    return config.to_dict()
+
+
+@api_router.post("/config")
+async def save_config(request: ConfigRequest) -> dict[str, Any]:
+    config_data = request.model_dump(exclude_none=True)
+    config_data.pop("api_key", None)
+
+    from cscode.core.config import ConfigStore
+    if _db is not None:
+        store = ConfigStore(_db)
+        await store.save(config_data)
+
+    return {"status": "saved", "config": config_data}
+
+
+@api_router.post("/sessions", response_model=dict[str, Any])
+async def create_session(request: SessionCreateRequest) -> dict[str, Any]:
+    if _session_store is None:
+        raise HTTPException(status_code=503, detail="Server not initialized")
+
+    session = await _session_store.create(title=request.title)
+    return {
+        "id": session.id,
+        "title": session.title,
+        "created_at": session.created_at.isoformat() if session.created_at else "",
+    }
+
+
+@api_router.delete("/sessions/{session_id}")
+async def delete_session(session_id: str) -> dict[str, str]:
+    if _session_store is None:
+        raise HTTPException(status_code=503, detail="Server not initialized")
+
+    await _session_store.delete(session_id)
+    return {"status": "deleted", "id": session_id}
+
+
+app.include_router(api_router)
+
+if WEB_DIST.exists():
+    app.mount("/", StaticFiles(directory=str(WEB_DIST), html=True), name="web")
 
 
 @app.on_event("startup")
@@ -83,41 +183,3 @@ async def startup() -> None:
 async def shutdown() -> None:
     if _db is not None:
         await _db.close()
-
-
-@app.get("/api/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.1.0"}
-
-
-@app.post("/api/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest) -> ChatResponse:
-    if _agent is None or _session_store is None:
-        raise HTTPException(status_code=503, detail="Server not initialized")
-
-    session_id = request.session_id or str(uuid.uuid4())
-
-    try:
-        response = await _agent.run(request.message)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-    return ChatResponse(response=response, session_id=session_id)
-
-
-@app.get("/api/sessions")
-async def list_sessions() -> list[dict[str, Any]]:
-    if _session_store is None:
-        raise HTTPException(status_code=503, detail="Server not initialized")
-    sessions = await _session_store.list()
-    return [
-        {
-            "id": s.id,
-            "title": s.title,
-            "provider": s.provider,
-            "model": s.model,
-            "created_at": s.created_at.isoformat() if s.created_at else "",
-            "updated_at": s.updated_at.isoformat() if s.updated_at else "",
-        }
-        for s in sessions
-    ]
