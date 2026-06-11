@@ -1,0 +1,160 @@
+name: Build Desktop App
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            ext: ""
+            pkg: deb
+          - os: macos-14
+            target: aarch64-apple-darwin
+            ext: ""
+            pkg: dmg
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            ext: .exe
+            pkg: msi
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            src/cscode/web/package-lock.json
+            desktop/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential \
+            curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf
+
+      - name: Install system dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          which cargo && cargo --version
+
+      - name: Install system dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          choco install -y webkit2gtk 2>$null || true
+
+      - name: Create and activate Python venv
+        shell: bash
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          pip install -e .
+          pip install pyinstaller
+
+      - name: Build React frontend
+        working-directory: src/cscode/web
+        run: |
+          npm ci
+          npx vite build
+
+      - name: Build server binary (PyInstaller)
+        shell: bash
+        run: |
+          source .venv/bin/activate
+          pyinstaller \
+            --onefile \
+            --name cscode-server \
+            --hidden-import cscode \
+            --hidden-import cscode.core \
+            --hidden-import cscode.core.config \
+            --hidden-import cscode.core.engine \
+            --hidden-import cscode.core.messages \
+            --hidden-import cscode.providers \
+            --hidden-import cscode.providers.base \
+            --hidden-import cscode.providers.openai \
+            --hidden-import cscode.providers.anthropic \
+            --hidden-import cscode.providers.ollama \
+            --hidden-import cscode.tools \
+            --hidden-import cscode.tools.base \
+            --hidden-import cscode.tools.read \
+            --hidden-import cscode.tools.write \
+            --hidden-import cscode.tools.edit \
+            --hidden-import cscode.tools.bash \
+            --hidden-import cscode.tools.grep \
+            --hidden-import cscode.tools.glob \
+            --hidden-import cscode.tools.ls \
+            --hidden-import cscode.storage \
+            --hidden-import cscode.storage.db \
+            --hidden-import cscode.storage.session \
+            --hidden-import cscode.server \
+            --add-data "src/cscode/web/dist:web/dist" \
+            src/cscode/server/app.py
+
+      - name: Copy binary to Tauri resources (replace placeholder)
+        shell: bash
+        run: |
+          mkdir -p desktop/src-tauri/binaries
+          cp dist/cscode-server "desktop/src-tauri/binaries/cscode-server"
+
+      - name: Install Tauri npm dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Build Tauri app
+        working-directory: desktop
+        run: npx tauri build
+
+      - name: Upload installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cscode-${{ runner.os }}-${{ matrix.pkg }}
+          path: |
+            desktop/src-tauri/target/release/bundle/**/*
+          compression-level: 0
+
+  create-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            cscode-Linux-deb/**/*
+            cscode-macOS-dmg/**/*
+            cscode-Windows-msi/**/*
+          generate_release_notes: true

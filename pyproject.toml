@@ -1,0 +1,40 @@
+[project]
+name = "cscode"
+version = "0.1.0"
+description = "CScode - AI-powered coding assistant (Python implementation)"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.1.0",
+    "rich>=13.0.0",
+    "httpx>=0.27.0",
+    "aiosqlite>=0.20.0",
+    "pyyaml>=6.0",
+    "textual>=0.52.0",
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.29.0",
+    "pydantic>=2.0",
+]
+
+[project.scripts]
+cs = "cscode.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cscode"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+
+[tool.mypy]
+strict = true
+python_version = "3.11"
+exclude = ["tests/"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
