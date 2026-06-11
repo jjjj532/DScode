@@ -155,18 +155,15 @@ jobs:
         shell: bash
         run: npx tauri build --verbose 2>&1 || true
 
-      - name: Debug bundle output
-        shell: bash
-        run: |
-          echo "=== bundle dir ==="
-          ls desktop/src-tauri/target/release/bundle/ 2>&1 || echo "No bundle dir"
-          echo "=== done ==="
-
       - name: Upload installer artifacts
         uses: actions/upload-artifact@v4
         with:
           name: cscode-${{ runner.os }}-${{ matrix.pkg }}
-          path: desktop/src-tauri/target/release/bundle/**/*
+          path: |
+            desktop/src-tauri/target/release/bundle/msi/*.msi
+            desktop/src-tauri/target/release/bundle/nsis/*.exe
+            desktop/src-tauri/target/release/bundle/dmg/*.dmg
+            desktop/src-tauri/target/release/bundle/deb/*.deb
           compression-level: 0
 
   create-release:
