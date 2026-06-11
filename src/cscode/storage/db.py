@@ -27,7 +27,7 @@ class Database:
         row = await cursor.fetchone()
         current_version = row[0] if row[0] is not None else 0
 
-        migrations = [_migration_001]
+        migrations = [_migration_001, _migration_002]
         for i, migration in enumerate(migrations, start=1):
             if i > current_version:
                 await migration(self.conn)
@@ -36,6 +36,14 @@ class Database:
 
     async def close(self) -> None:
         await self.conn.close()
+
+    async def fetchone(self, query: str, params: tuple = ()) -> aiosqlite.Row | None:
+        cursor = await self.conn.execute(query, params)
+        return await cursor.fetchone()
+
+    async def execute(self, query: str, params: tuple = ()) -> None:
+        await self.conn.execute(query, params)
+        await self.conn.commit()
 
 
 async def _migration_001(conn: aiosqlite.Connection) -> None:
@@ -60,5 +68,14 @@ async def _migration_001(conn: aiosqlite.Connection) -> None:
             name TEXT,
             created_at TEXT NOT NULL,
             FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        )
+    """)
+
+
+async def _migration_002(conn: aiosqlite.Connection) -> None:
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS config (
+            key TEXT PRIMARY KEY,
+            data TEXT
         )
     """)

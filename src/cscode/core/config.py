@@ -3,9 +3,12 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
+
+if TYPE_CHECKING:
+    from cscode.storage.db import Database
 
 
 class ConfigError(Exception):
@@ -94,3 +97,30 @@ def load_config(
         config = config.merge(Config.from_dict(cli_overrides))
 
     return config
+
+
+class ConfigStore:
+    """Store and retrieve config from SQLite."""
+
+    def __init__(self, db: Database):
+        self.db = db
+
+    async def get(self) -> dict[str, Any] | None:
+        row = await self.db.fetchone(
+            "SELECT data FROM config WHERE key = 'user_config'"
+        )
+        if row and row["data"]:
+            import json
+            return json.loads(row["data"])
+        return None
+
+    async def save(self, data: dict[str, Any]) -> None:
+        import json
+        data_json = json.dumps(data, default=str)
+        await self.db.execute(
+            """
+            INSERT INTO config (key, data) VALUES ('user_config', ?)
+            ON CONFLICT(key) DO UPDATE SET data = excluded.data
+            """,
+            (data_json,),
+        )
