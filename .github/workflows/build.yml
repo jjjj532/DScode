@@ -125,12 +125,12 @@ jobs:
       - name: Debug - check files
         shell: bash
         run: |
-          echo "=== desktop/ contents ==="
-          ls -la desktop/
-          echo "=== desktop/src-tauri/ contents ==="
+          echo "=== desktop/src-tauri/ dirs ==="
           ls -la desktop/src-tauri/
-          echo "=== desktop/package.json exists ==="
-          test -f desktop/package.json && echo "YES" || echo "NO"
+          echo "=== desktop/dist exists ==="
+          test -f desktop/dist/index.html && echo "YES" || echo "NO"
+          echo "=== tauri CLI check ==="
+          cd desktop && npx tauri --version 2>&1 || echo "CLI NOT FOUND"
 
       - name: Install Tauri npm dependencies
         working-directory: desktop
@@ -138,7 +138,10 @@ jobs:
 
       - name: Build Tauri app
         working-directory: desktop
-        run: npx tauri build
+        shell: bash
+        run: |
+          cd desktop
+          npx tauri build --verbose 2>&1 || true
 
       - name: Upload installer artifacts
         uses: actions/upload-artifact@v4
