@@ -160,7 +160,10 @@ jobs:
         with:
           name: cscode-${{ runner.os }}-${{ matrix.pkg }}
           path: |
-            desktop/src-tauri/target/release/bundle/**/*
+            desktop/src-tauri/target/release/bundle/**/*.dmg
+            desktop/src-tauri/target/release/bundle/**/*.deb
+            desktop/src-tauri/target/release/bundle/**/*.msi
+            desktop/src-tauri/target/release/bundle/**/*.exe
           compression-level: 0
 
   create-release:
