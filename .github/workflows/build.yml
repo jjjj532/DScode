@@ -79,7 +79,11 @@ jobs:
         shell: bash
         run: |
           python -m venv .venv
-          source .venv/bin/activate
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            source .venv/Scripts/activate
+          else
+            source .venv/bin/activate
+          fi
           pip install -e .
           pip install pyinstaller
 
@@ -88,6 +92,12 @@ jobs:
         run: |
           npm ci
           npx vite build
+
+      - name: Copy web dist to desktop
+        shell: bash
+        run: |
+          mkdir -p desktop/dist
+          cp -r src/cscode/web/dist/* desktop/dist/
 
       - name: Build server binary (PyInstaller)
         shell: bash
