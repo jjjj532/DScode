@@ -139,9 +139,7 @@ jobs:
       - name: Build Tauri app
         working-directory: desktop
         shell: bash
-        run: |
-          cd desktop
-          npx tauri build --verbose 2>&1 || true
+        run: npx tauri build --verbose 2>&1 || true
 
       - name: Upload installer artifacts
         uses: actions/upload-artifact@v4
