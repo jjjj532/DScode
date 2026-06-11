@@ -1,28 +1,28 @@
-import { useState, useRef, useEffect } from 'react'
-
-interface Message {
-  role: 'user' | 'assistant'
-  content: string
-}
+import { useState, useRef, useEffect } from 'react';
+import { Sidebar } from './components/Sidebar';
+import { SettingsPanel } from './components/SettingsPanel';
+import { useConfig } from './context/ConfigContext';
+import { Message } from './types';
 
 function App() {
-  const [messages, setMessages] = useState<Message[]>([])
-  const [input, setInput] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [sessionId, setSessionId] = useState<string | null>(null)
-  const endRef = useRef<HTMLDivElement>(null)
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const endRef = useRef<HTMLDivElement>(null);
+  const { currentSession, setCurrentSession } = useConfig();
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+    endRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   const sendMessage = async () => {
-    if (!input.trim() || loading) return
+    if (!input.trim() || loading) return;
 
-    const userMsg: Message = { role: 'user', content: input }
-    setMessages(prev => [...prev, userMsg])
-    setInput('')
-    setLoading(true)
+    const userMsg: Message = { role: 'user', content: input };
+    setMessages(prev => [...prev, userMsg]);
+    setInput('');
+    setLoading(true);
 
     try {
       const res = await fetch('/api/chat', {
@@ -30,98 +30,104 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: userMsg.content,
-          session_id: sessionId,
+          session_id: currentSession,
         }),
-      })
-      const data = await res.json()
-      setSessionId(data.session_id)
-      const assistantMsg: Message = { role: 'assistant', content: data.response }
-      setMessages(prev => [...prev, assistantMsg])
+      });
+      const data = await res.json();
+      setCurrentSession(data.session_id);
+      const assistantMsg: Message = { role: 'assistant', content: data.response };
+      setMessages(prev => [...prev, assistantMsg]);
     } catch (err) {
-      const errorMsg: Message = { role: 'assistant', content: 'Error: ' + String(err) }
-      setMessages(prev => [...prev, errorMsg])
+      const errorMsg: Message = { role: 'assistant', content: 'Error: ' + String(err) };
+      setMessages(prev => [...prev, errorMsg]);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   return (
-    <div style={{ maxWidth: 800, margin: '0 auto', padding: 20, fontFamily: 'system-ui, sans-serif' }}>
-      <h1 style={{ borderBottom: '2px solid #646cff', paddingBottom: 10 }}>
-        CScode
-        <span style={{ fontSize: 14, color: '#666', marginLeft: 10 }}>
-          AI Coding Assistant
-        </span>
-      </h1>
+    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
+      <Sidebar onSettingsClick={() => setSettingsOpen(true)} />
 
-      <div style={{
-        height: '60vh',
-        overflowY: 'auto',
-        border: '1px solid #ccc',
-        borderRadius: 8,
-        padding: 16,
-        marginBottom: 16,
-        background: '#fafafa',
-      }}>
-        {messages.length === 0 && (
-          <p style={{ color: '#999', textAlign: 'center', marginTop: 40 }}>
-            Send a message to start chatting with CScode.
-          </p>
-        )}
-        {messages.map((msg, i) => (
-          <div key={i} style={{
-            marginBottom: 12,
-            textAlign: msg.role === 'user' ? 'right' : 'left',
-          }}>
-            <div style={{
-              display: 'inline-block',
-              padding: '8px 16px',
-              borderRadius: 12,
-              background: msg.role === 'user' ? '#646cff' : '#e0e0e0',
-              color: msg.role === 'user' ? '#fff' : '#000',
-              maxWidth: '80%',
-              whiteSpace: 'pre-wrap',
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', maxWidth: 800, margin: '0 auto', padding: 20 }}>
+        <h1 style={{ borderBottom: '2px solid #646cff', paddingBottom: 10, marginBottom: 16 }}>
+          CScode
+          <span style={{ fontSize: 14, color: '#666', marginLeft: 10 }}>
+            AI Coding Assistant
+          </span>
+        </h1>
+
+        <div style={{
+          flex: 1,
+          overflowY: 'auto',
+          border: '1px solid #e0e0e0',
+          borderRadius: 8,
+          padding: 16,
+          marginBottom: 16,
+          background: '#fafafa',
+        }}>
+          {messages.length === 0 && (
+            <p style={{ color: '#999', textAlign: 'center', marginTop: 40 }}>
+              Start a conversation with CScode...
+            </p>
+          )}
+          {messages.map((msg, i) => (
+            <div key={i} style={{
+              marginBottom: 12,
+              textAlign: msg.role === 'user' ? 'right' : 'left',
             }}>
-              {msg.content}
+              <div style={{
+                display: 'inline-block',
+                padding: '8px 16px',
+                borderRadius: 12,
+                background: msg.role === 'user' ? '#646cff' : '#e0e0e0',
+                color: msg.role === 'user' ? '#fff' : '#000',
+                maxWidth: '80%',
+                whiteSpace: 'pre-wrap',
+              }}>
+                {msg.content}
+              </div>
             </div>
-          </div>
-        ))}
-        <div ref={endRef} />
+          ))}
+          <div ref={endRef} />
+        </div>
+
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && sendMessage()}
+            placeholder="Type your message..."
+            disabled={loading}
+            style={{
+              flex: 1,
+              padding: '10px 16px',
+              borderRadius: 8,
+              border: '1px solid #ccc',
+              fontSize: 16,
+            }}
+          />
+          <button
+            onClick={sendMessage}
+            disabled={loading || !input.trim()}
+            style={{
+              padding: '10px 24px',
+              borderRadius: 8,
+              border: 'none',
+              background: loading ? '#ccc' : '#646cff',
+              color: '#fff',
+              fontSize: 16,
+              cursor: loading ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {loading ? '...' : 'Send'}
+          </button>
+        </div>
       </div>
 
-      <div style={{ display: 'flex', gap: 8 }}>
-        <input
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && sendMessage()}
-          placeholder="Type your message..."
-          disabled={loading}
-          style={{
-            flex: 1,
-            padding: '10px 16px',
-            borderRadius: 8,
-            border: '1px solid #ccc',
-            fontSize: 16,
-          }}
-        />
-        <button
-          onClick={sendMessage}
-          disabled={loading || !input.trim()}
-          style={{
-            padding: '10px 24px',
-            borderRadius: 8,
-            border: 'none',
-            background: loading ? '#ccc' : '#646cff',
-            color: '#fff',
-            fontSize: 16,
-            cursor: loading ? 'not-allowed' : 'pointer',
-          }}
-        >
-          {loading ? '...' : 'Send'}
-        </button>
-      </div>
+      <SettingsPanel isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
-  )
+  );
 }
 
-export default App
+export default App;
