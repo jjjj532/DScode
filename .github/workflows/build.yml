@@ -121,11 +121,15 @@ jobs:
             --add-data "src/cscode/web/dist:web/dist" \
             src/cscode/server/app.py
 
-      - name: Copy binary to Tauri resources (replace placeholder)
+      - name: Debug - check files
         shell: bash
         run: |
-          mkdir -p desktop/src-tauri/binaries
-          cp dist/cscode-server "desktop/src-tauri/binaries/cscode-server"
+          echo "=== desktop/ contents ==="
+          ls -la desktop/
+          echo "=== desktop/src-tauri/ contents ==="
+          ls -la desktop/src-tauri/
+          echo "=== desktop/package.json exists ==="
+          test -f desktop/package.json && echo "YES" || echo "NO"
 
       - name: Install Tauri npm dependencies
         working-directory: desktop
