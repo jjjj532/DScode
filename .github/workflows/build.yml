@@ -159,7 +159,7 @@ jobs:
         shell: bash
         run: |
           echo "=== bundle dir ==="
-          find desktop/src-tauri/target/release/bundle -type f 2>/dev/null | head -30
+          ls -la desktop/src-tauri/target/release/bundle/
           echo "=== done ==="
 
       - name: Upload installer artifacts
