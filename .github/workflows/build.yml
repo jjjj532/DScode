@@ -159,11 +159,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: cscode-${{ runner.os }}-${{ matrix.pkg }}
-          path: |
-            desktop/src-tauri/target/release/bundle/**/*.dmg
-            desktop/src-tauri/target/release/bundle/**/*.deb
-            desktop/src-tauri/target/release/bundle/**/*.msi
-            desktop/src-tauri/target/release/bundle/**/*.exe
+          path: desktop/src-tauri/target/release/bundle/**/*
           compression-level: 0
 
   create-release:
