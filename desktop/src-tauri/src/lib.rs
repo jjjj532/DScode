@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -15,32 +15,126 @@ impl BackendState {
         Self { child: None, port }
     }
 
-    fn start(&mut self, resource_dir: Option<&Path>) -> Result<(), String> {
-        let bundled = resource_dir
-            .map(|d| d.join("binaries").join("cscode-server"))
-            .filter(|p| p.exists());
+    fn kill_port(&self, port: u16) -> Result<(), String> {
+        #[cfg(target_os = "macos")]
+        {
+            let output = Command::new("lsof")
+                .args(["-ti", &format!(":{}", port)])
+                .output()
+                .map_err(|e| format!("Failed to check port: {e}"))?;
 
-        let mut cmd = if let Some(bin) = bundled {
-            let mut c = Command::new(bin);
-            c.args(["--port", &self.port.to_string(), "--host", "127.0.0.1"]);
-            c
-        } else {
-            let mut c = Command::new("python3");
-            c.args([
-                "-m",
-                "cscode",
-                "server",
-                "--port",
-                &self.port.to_string(),
-                "--host",
-                "127.0.0.1",
-            ]);
-            c
-        };
+            let pids = String::from_utf8_lossy(&output.stdout);
+            for pid in pids.lines() {
+                if let Ok(pid) = pid.trim().parse::<u32>() {
+                    Command::new("kill")
+                        .args(["-9", &pid.to_string()])
+                        .output()
+                        .map_err(|e| format!("Failed to kill process: {e}"))?;
+                }
+            }
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let output = Command::new("fuser")
+                .args(["-k", &format!("{}/tcp", port)])
+                .output()
+                .map_err(|e| format!("Failed to kill process: {e}"))?;
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let output = Command::new("cmd")
+                .args(["/C", "for /f \"tokens=5\" %a in ('netstat -aon ^| findstr :{}') do taskkill /f /pid %a", port])
+                .output()
+                .map_err(|e| format!("Failed to kill process: {e}"))?;
+        }
+        Ok(())
+    }
+
+    fn start(&mut self, resource_dir: Option<&Path>) -> Result<(), String> {
+        self.kill_port(self.port)?;
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        let port_str = self.port.to_string();
+
+        // Finder launches apps with a minimal PATH; set it to find python3
+        let path = std::env::var("PATH").unwrap_or_default();
+        let safe_path = format!(
+            "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:{}",
+            path
+        );
+
+        // Locate python3: check common locations first, then rely on PATH
+        let python_candidates = [
+            "/usr/local/bin/python3",
+            "/opt/homebrew/bin/python3",
+            "/usr/bin/python3",
+        ];
+        let python_exe = python_candidates
+            .iter()
+            .find(|p| Path::new(p).exists())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "python3".to_string());
+
+        // 1. Try bundled Python source in Resources/python/
+        if let Some(dir) = resource_dir {
+            let bundled_python = dir.join("python");
+            eprintln!("Trying bundled python: {}", bundled_python.display());
+            if bundled_python.join("cscode").join("server").join("app.py").exists() {
+                let mut cmd = Command::new(&python_exe);
+                cmd.env("PYTHONPATH", bundled_python.to_string_lossy().to_string());
+                cmd.env("CSCORE_RESOURCE_DIR", dir.to_string_lossy().to_string());
+                cmd.env("PATH", &safe_path);
+                cmd.args(["-m", "cscode", "server", "--port", &port_str, "--host", "127.0.0.1"]);
+                cmd.stdout(Stdio::inherit());
+                cmd.stderr(Stdio::inherit());
+
+                match cmd.spawn() {
+                    Ok(child) => {
+                        eprintln!("Started server from bundled python source");
+                        self.child = Some(child);
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        eprintln!("Bundled python failed: {e}, falling back to dev mode");
+                    }
+                }
+            }
+        }
+
+        // 2. Fallback: development project
+        let mut possible_paths: Vec<PathBuf> = vec![
+            PathBuf::from("/Users/mac/AI/CScode"),
+            PathBuf::from("."),
+        ];
+
+        if let Ok(cwd) = std::env::current_dir() {
+            possible_paths.push(cwd.clone());
+            possible_paths.push(cwd.parent().unwrap_or(&cwd).to_path_buf());
+        }
+
+        let project_root = possible_paths
+            .iter()
+            .find(|p| p.join("src/cscode/server/app.py").exists())
+            .cloned()
+            .ok_or("Could not find project root (src/cscode/server/app.py)")?;
+
+        let src_path = project_root.join("src");
+        let python_path = src_path.to_string_lossy().to_string();
+
+        eprintln!("Project root: {}", project_root.display());
+
+        let mut cmd = Command::new(&python_exe);
+        cmd.env("PYTHONPATH", &python_path);
+        cmd.env("PATH", &safe_path);
+        if let Some(dir) = resource_dir {
+            cmd.env("CSCORE_RESOURCE_DIR", dir.to_string_lossy().to_string());
+        }
+        cmd.current_dir(&project_root);
+        cmd.args(["-m", "cscode", "server", "--port", &port_str, "--host", "127.0.0.1"]);
+        cmd.stdout(Stdio::inherit());
+        cmd.stderr(Stdio::inherit());
 
         let child = cmd
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
             .spawn()
             .map_err(|e| format!("Failed to start backend: {e}"))?;
 
@@ -64,13 +158,13 @@ async fn wait_for_health(port: u16) -> Result<(), String> {
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
 
-    for _ in 0..50 {
+    for _ in 0..150 {
         match client.get(&url).send().await {
             Ok(resp) if resp.status().is_success() => return Ok(()),
             _ => tokio::time::sleep(Duration::from_millis(200)).await,
         }
     }
-    Err(format!("Backend at {url} did not become ready within 10 seconds"))
+    Err(format!("Backend at {url} did not become ready within 30 seconds"))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -82,9 +176,8 @@ pub fn run() {
         .setup(move |app| {
             let resource_dir = app.path().resource_dir().ok();
 
-            // Start backend (tries bundled binary first, falls back to python3)
             if let Err(e) = backend.start(resource_dir.as_deref()) {
-                eprintln!("{e}");
+                eprintln!("Backend start error: {e}");
             }
 
             let window = app.get_webview_window("main").ok_or("no main window")?;
@@ -94,10 +187,16 @@ pub fn run() {
                     Ok(()) => {
                         let url = url::Url::parse(&format!("http://127.0.0.1:{port}"))
                             .expect("invalid URL");
+                        // Fade out the loading page, then navigate
+                        let _ = window.eval("document.body.classList.add('fade-out')");
+                        tokio::time::sleep(Duration::from_millis(200)).await;
                         let _ = window.navigate(url);
                     }
                     Err(e) => {
-                        eprintln!("{e}");
+                        eprintln!("Health check failed: {e}");
+                        let _ = window.eval(
+                            "document.body.innerHTML = '<div style=\"display:flex;align-items:center;justify-content:center;height:100vh;background:#1a1a2e;color:#e0e0e0;font-family:sans-serif;text-align:center\"><div><h2>Backend Failed to Start</h2><p>Please ensure Python 3.11+ is installed.</p></div></div>'"
+                        );
                     }
                 }
             });

@@ -7,42 +7,67 @@ interface SettingsPanelProps {
   onClose: () => void;
 }
 
-const PROVIDERS = ['openai', 'anthropic', 'ollama'] as const;
+const PROVIDERS = ['openai', 'anthropic', 'ollama', 'custom'] as const;
 
 const MODEL_OPTIONS: Record<string, string[]> = {
   openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4', 'gpt-3.5-turbo'],
   anthropic: ['claude-3-5-sonnet-20241022', 'claude-3-opus-20240229', 'claude-3-haiku-20240307'],
   ollama: ['llama3.2', 'llama3.1', 'qwen2.5', 'mistral'],
+  custom: [],
 };
 
 export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
   const { config, setConfig } = useConfig();
   const [localConfig, setLocalConfig] = useState<Partial<Config>>({});
+  const [customProvider, setCustomProvider] = useState('');
+  const [customModel, setCustomModel] = useState('');
 
   useEffect(() => {
     if (config) {
       setLocalConfig({ ...config });
+      if (config.provider && !PROVIDERS.includes(config.provider as any)) {
+        setCustomProvider(config.provider);
+        setCustomModel(config.model || '');
+      }
     }
   }, [config]);
 
   const handleSave = async () => {
-    if (localConfig.provider && localConfig.model) {
-      await setConfig(localConfig as Config);
-      onClose();
-    }
+    const provider = customProvider || localConfig.provider || 'openai';
+    const model = customModel || localConfig.model || 'gpt-4o';
+
+    const configToSave: Config = {
+      provider: provider as Config['provider'],
+      model: model,
+      api_base: localConfig.api_base || null,
+      api_key: localConfig.api_key,
+      max_tokens: localConfig.max_tokens || 4096,
+      temperature: localConfig.temperature ?? 0.7,
+      top_p: localConfig.top_p ?? 1.0,
+      system_prompt: localConfig.system_prompt || null,
+    };
+
+    await setConfig(configToSave);
+    onClose();
   };
 
   const handleProviderChange = (provider: string) => {
-    const models = MODEL_OPTIONS[provider] || [];
-    setLocalConfig({
-      ...localConfig,
-      provider: provider as Config['provider'],
-      model: models[0] || '',
-      api_base: provider === 'ollama' ? 'http://localhost:11434' : '',
-    });
+    if (provider === 'custom') {
+      setLocalConfig({ ...localConfig, provider: 'custom' });
+    } else {
+      const models = MODEL_OPTIONS[provider] || [];
+      setLocalConfig({
+        ...localConfig,
+        provider: provider as Config['provider'],
+        model: models[0] || '',
+        api_base: provider === 'ollama' ? 'http://localhost:11434' : '',
+      });
+    }
   };
 
   if (!isOpen) return null;
+
+  const isCustom = localConfig.provider === 'custom' || customProvider;
 
   return (
     <div style={{
@@ -68,28 +93,57 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
         <div>
           <label style={{ display: 'block', marginBottom: 6, fontWeight: 500 }}>Provider</label>
           <select
-            value={localConfig.provider || 'openai'}
+            value={isCustom ? 'custom' : (localConfig.provider || 'openai')}
             onChange={(e) => handleProviderChange(e.target.value)}
             style={{ width: '100%', padding: 10, borderRadius: 6, border: '1px solid #ddd', fontSize: 14 }}
           >
             {PROVIDERS.map((p) => (
-              <option key={p} value={p}>{p.toUpperCase()}</option>
+              <option key={p} value={p}>
+                {p === 'custom' ? 'Custom (自定义)' : p.toUpperCase()}
+              </option>
             ))}
           </select>
         </div>
 
-        <div>
-          <label style={{ display: 'block', marginBottom: 6, fontWeight: 500 }}>Model</label>
-          <select
-            value={localConfig.model || ''}
-            onChange={(e) => setLocalConfig({ ...localConfig, model: e.target.value })}
-            style={{ width: '100%', padding: 10, borderRadius: 6, border: '1px solid #ddd', fontSize: 14 }}
-          >
-            {(MODEL_OPTIONS[localConfig.provider || 'openai'] || []).map((m) => (
-              <option key={m} value={m}>{m}</option>
-            ))}
-          </select>
-        </div>
+        {isCustom && (
+          <>
+            <div>
+              <label style={{ display: 'block', marginBottom: 6, fontWeight: 500 }}>Custom Provider Name</label>
+              <input
+                type="text"
+                value={customProvider}
+                onChange={(e) => setCustomProvider(e.target.value)}
+                placeholder="e.g., custom-openai, azure-openai"
+                style={{ width: '100%', padding: 10, borderRadius: 6, border: '1px solid #ddd', fontSize: 14 }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', marginBottom: 6, fontWeight: 500 }}>Custom Model Name</label>
+              <input
+                type="text"
+                value={customModel}
+                onChange={(e) => setCustomModel(e.target.value)}
+                placeholder="e.g., gpt-4-turbo, llama-3-70b"
+                style={{ width: '100%', padding: 10, borderRadius: 6, border: '1px solid #ddd', fontSize: 14 }}
+              />
+            </div>
+          </>
+        )}
+
+        {!isCustom && (
+          <div>
+            <label style={{ display: 'block', marginBottom: 6, fontWeight: 500 }}>Model</label>
+            <select
+              value={localConfig.model || ''}
+              onChange={(e) => setLocalConfig({ ...localConfig, model: e.target.value })}
+              style={{ width: '100%', padding: 10, borderRadius: 6, border: '1px solid #ddd', fontSize: 14 }}
+            >
+              {(MODEL_OPTIONS[localConfig.provider || 'openai'] || []).map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <div>
           <label style={{ display: 'block', marginBottom: 6, fontWeight: 500 }}>API Base URL</label>

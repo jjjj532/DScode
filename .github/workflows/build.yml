@@ -85,7 +85,6 @@ jobs:
             source .venv/bin/activate
           fi
           pip install -e .
-          pip install pyinstaller
 
       - name: Build React frontend
         working-directory: src/cscode/web
@@ -96,45 +95,24 @@ jobs:
       - name: Copy web dist to desktop
         shell: bash
         run: |
-          mkdir -p desktop/dist
+          mkdir -p desktop/dist desktop/src-tauri/web-dist
           cp -r src/cscode/web/dist/* desktop/dist/
+          cp -r src/cscode/web/dist/* desktop/src-tauri/web-dist/
 
-      - name: Build server binary (PyInstaller)
+      - name: Bundle Python source for Tauri resources (macOS)
+        if: runner.os == 'macOS'
         shell: bash
         run: |
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            source .venv/Scripts/activate
-          else
-            source .venv/bin/activate
-          fi
-          pyinstaller \
-            --onefile \
-            --name cscode-server \
-            --hidden-import cscode \
-            --hidden-import cscode.core \
-            --hidden-import cscode.core.config \
-            --hidden-import cscode.core.engine \
-            --hidden-import cscode.core.messages \
-            --hidden-import cscode.providers \
-            --hidden-import cscode.providers.base \
-            --hidden-import cscode.providers.openai \
-            --hidden-import cscode.providers.anthropic \
-            --hidden-import cscode.providers.ollama \
-            --hidden-import cscode.tools \
-            --hidden-import cscode.tools.base \
-            --hidden-import cscode.tools.read \
-            --hidden-import cscode.tools.write \
-            --hidden-import cscode.tools.edit \
-            --hidden-import cscode.tools.bash \
-            --hidden-import cscode.tools.grep \
-            --hidden-import cscode.tools.glob \
-            --hidden-import cscode.tools.ls \
-            --hidden-import cscode.storage \
-            --hidden-import cscode.storage.db \
-            --hidden-import cscode.storage.session \
-            --hidden-import cscode.server \
-            --add-data "src/cscode/web/dist:web/dist" \
-            src/cscode/server/app.py
+          mkdir -p desktop/src-tauri/python
+          # Copy only Python files and web/dist, exclude node_modules
+          cd src
+          find cscode -path '*/web/dist' -prune -o -path '*/node_modules' -prune -o -type f \( -name '*.py' -o -name '*.json' -o -name '*.yaml' -o -name '*.yml' \) -print | cpio -pdm ../desktop/src-tauri/python/ 2>/dev/null || true
+          # Copy web/dist separately
+          mkdir -p ../desktop/src-tauri/python/cscode/web
+          cp -r cscode/web/dist ../desktop/src-tauri/python/cscode/web/
+          find ../desktop/src-tauri/python -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+          echo "Python source bundled"
+          du -sh ../desktop/src-tauri/python/
 
       - name: Debug - check files
         shell: bash
@@ -153,7 +131,37 @@ jobs:
       - name: Build Tauri app
         working-directory: desktop
         shell: bash
-        run: npx tauri build --verbose 2>&1 || true
+        run: npx tauri build --verbose --bundles app 2>&1 || true
+
+      - name: Fix DMG resources and create DMG (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          APP_PATH="desktop/src-tauri/target/release/bundle/macos/CScode.app"
+          DMG_DIR="desktop/src-tauri/target/release/bundle/dmg"
+          mkdir -p "$DMG_DIR"
+          
+          # Ensure web-dist is in Resources
+          if [ ! -d "$APP_PATH/Contents/Resources/web-dist" ]; then
+            mkdir -p "$APP_PATH/Contents/Resources/web-dist"
+            cp -r src/cscode/web/dist/* "$APP_PATH/Contents/Resources/web-dist/"
+          fi
+          
+          # Ensure python source is in Resources
+          if [ ! -d "$APP_PATH/Contents/Resources/python" ]; then
+            mkdir -p "$APP_PATH/Contents/Resources/python"
+            cp -r desktop/src-tauri/python/* "$APP_PATH/Contents/Resources/python/"
+          fi
+          
+          # Create DMG from the corrected .app
+          STAGING="/tmp/cscode-dmg-$$"
+          mkdir -p "$STAGING"
+          cp -rf "$APP_PATH" "$STAGING/"
+          ln -s /Applications "$STAGING/Applications"
+          VERSION=$(grep '"version"' desktop/src-tauri/tauri.conf.json | cut -d'"' -f4)
+          rm -f "$DMG_DIR"/*.dmg
+          hdiutil create -volname "CScode" -srcfolder "$STAGING" -ov -format UDZO -imagekey zlib-level=9 "$DMG_DIR/CScode_${VERSION}_x64.dmg"
+          rm -rf "$STAGING"
 
       - name: Upload installer artifacts
         uses: actions/upload-artifact@v4

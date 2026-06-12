@@ -17,9 +17,10 @@ class SessionStore:
         title: str = "",
         provider: str = "openai",
         model: str = "gpt-4o",
+        session_id: str | None = None,
     ) -> Session:
         now = datetime.now(timezone.utc)
-        session_id = str(uuid.uuid4())
+        session_id = session_id or str(uuid.uuid4())
         await self._db.conn.execute(
             """INSERT INTO sessions (id, title, provider, model, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?)""",

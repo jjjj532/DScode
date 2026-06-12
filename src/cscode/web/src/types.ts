@@ -1,5 +1,5 @@
 export interface Config {
-  provider: 'openai' | 'anthropic' | 'ollama';
+  provider: string;
   model: string;
   api_base: string | null;
   api_key?: string;
@@ -31,4 +31,10 @@ export interface ChatRequest {
 export interface ChatResponse {
   response: string;
   session_id: string;
+}
+
+export interface SessionMessage {
+  role: string;
+  content: string;
+  created_at: string;
 }

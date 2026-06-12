@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { Config, Session } from '../types';
+import { Config, Session, SessionMessage } from '../types';
 
 interface ConfigContextType {
   config: Config | null;
@@ -11,6 +11,7 @@ interface ConfigContextType {
   createSession: (title: string) => Promise<string>;
   deleteSession: (id: string) => Promise<void>;
   setCurrentSession: (id: string | null) => void;
+  loadSessionMessages: (sessionId: string) => Promise<SessionMessage[]>;
 }
 
 const ConfigContext = createContext<ConfigContextType | null>(null);
@@ -52,19 +53,51 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   };
 
   const createSession = async (title: string): Promise<string> => {
-    const res = await fetch('/api/sessions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title }),
-    });
-    const data = await res.json();
-    await loadSessions();
-    return data.id;
+    try {
+      const res = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title }),
+      });
+      if (!res.ok) {
+        console.error('Failed to create session:', res.status);
+        throw new Error('Failed to create session');
+      }
+      const data = await res.json();
+      await loadSessions();
+      return data.id;
+    } catch (err) {
+      console.error('Error creating session:', err);
+      throw err;
+    }
   };
 
   const deleteSession = async (id: string) => {
-    await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
-    await loadSessions();
+    try {
+      const res = await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        console.error('Failed to delete session:', res.status);
+        throw new Error('Failed to delete session');
+      }
+      await loadSessions();
+    } catch (err) {
+      console.error('Error deleting session:', err);
+      throw err;
+    }
+  };
+
+  const loadSessionMessages = async (sessionId: string): Promise<SessionMessage[]> => {
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/messages`);
+      if (!res.ok) {
+        console.error('Failed to load messages:', res.status);
+        return [];
+      }
+      return await res.json();
+    } catch (err) {
+      console.error('Error loading messages:', err);
+      return [];
+    }
   };
 
   useEffect(() => {
@@ -84,6 +117,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         createSession,
         deleteSession,
         setCurrentSession,
+        loadSessionMessages,
       }}
     >
       {children}

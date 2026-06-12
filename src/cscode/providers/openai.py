@@ -15,6 +15,8 @@ class OpenAIProvider(LLMProvider):
         super().__init__(config)
         self._api_base = config.api_base or "https://api.openai.com/v1"
         self._model = config.model
+        self._api_key = config.api_key
+        print(f"DEBUG OpenAIProvider: api_base={self._api_base}, api_key={self._api_key[:20] if self._api_key else 'None'}...")
         self._client = httpx.AsyncClient(
             base_url=self._api_base,
             headers={
@@ -67,15 +69,21 @@ class OpenAIProvider(LLMProvider):
         tools: list[dict[str, Any]] | None = None,
     ) -> LLMResult:
         payload = self._build_payload(messages, tools, stream=False)
+        print(f"DEBUG: Sending request to {self._api_base}/chat/completions with model {self._model}")
+        print(f"DEBUG: Payload: {payload}")
         try:
             response = await self._client.post("/chat/completions", json=payload)
+            print(f"DEBUG: Response status: {response.status_code}")
+            print(f"DEBUG: Response body: {response.text[:500]}")
             response.raise_for_status()
             data = response.json()
         except httpx.HTTPStatusError as e:
+            print(f"DEBUG HTTPStatusError: {e.response.status_code} {e.response.text}")
             raise ProviderError(
                 f"OpenAI API error: {e.response.status_code} {e.response.text}"
             ) from e
         except httpx.RequestError as e:
+            print(f"DEBUG RequestError: {e}")
             raise ProviderError(f"Request failed: {e}") from e
 
         choice = data["choices"][0]
